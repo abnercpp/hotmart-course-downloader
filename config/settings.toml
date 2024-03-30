@@ -1,0 +1,22 @@
+[hotmart.selectors]
+accept-cookies-btn = ".cookie-policy-accept-all"
+
+[hotmart.selectors.courses]
+purchased-card = ".purchase_list__block .purchase-card"
+module-card = ".navigation-module"
+lesson-card = ".navigation-page"
+main-content-section = ".page-main-content"
+video-section = ".content-page-video"
+
+[hotmart.selectors.sso]
+username_txt = "#username"
+password_txt = "#password"
+login_btn = "#text-btn-login"
+
+[hotmart.urls]
+consumer-portal = "https://consumer.hotmart.com/"
+courses-portal = "https://consumer.hotmart.com/main"
+
+[hotmart.urls.patterns]
+login-portal = "https://sso.hotmart.com/login*"
+m3u8-master = "**/video/**/*.m3u8*"
