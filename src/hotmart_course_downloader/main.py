@@ -8,6 +8,7 @@ from typing import Callable, Awaitable
 import yt_dlp.utils.networking
 from aiofiles import open as aio_open
 from playwright.async_api import async_playwright, Page, Route, Locator
+from slugify import slugify
 from yt_dlp import YoutubeDL
 
 
@@ -30,9 +31,11 @@ class Config:
     course_module_title_selector: str
     course_lesson_card_selector: str
     course_lesson_title_selector: str
+    course_complete_lesson_selector: str
     course_main_content_selector: str
     course_video_content_selector: str
     video_part_selector: str
+    video_part_duration_selector: str
     active_video_part_selector: str
 
     sso_username_txt_selector: str
@@ -43,6 +46,7 @@ class Config:
     sso_user_password: str
 
     screenshot_extension: str
+    video_format: str
 
     downloads_folder: str
 
@@ -100,7 +104,7 @@ async def _on_course_entered(page: Page, semaphore: Semaphore, config: Config) -
                     continue
 
                 video_parts = await video_parts_locator.all()
-                video_parts.pop()
+                video_parts.pop(0)
 
                 for video_part in video_parts:
                     await _save_lesson_contents(module_card,
@@ -134,30 +138,30 @@ async def _save_lesson_contents(module_card: Locator,
     if await lesson_card.page.is_visible(config.course_video_content_selector):
         await event.wait()
     else:
-        path = await _ensure_path(module_card, lesson_card, module_no, lesson_no, config)
+        path = await _ensure_path_created(module_card, lesson_card, module_no, lesson_no, config)
         await main_content_selector.screenshot(path=f'{path.resolve()}.{config.screenshot_extension}')
 
     await lesson_card.page.unroute(config.m3u8_master_url_pattern)
     event.clear()
 
 
-async def _ensure_path(module_card: Locator,
-                       lesson_card: Locator,
-                       module_no: int,
-                       lesson_no: int,
-                       config: Config) -> Path:
-    course_title = _sanitize_course_name_component(await module_card.page.text_content(config.course_title_selector))
+async def _ensure_path_created(module_card: Locator,
+                               lesson_card: Locator,
+                               module_no: int,
+                               lesson_no: int,
+                               config: Config) -> Path:
+    course_title = slugify(await module_card.page.text_content(config.course_title_selector))
 
-    mod_index = _sanitize_course_name_component(
+    mod_index = slugify(
         await module_card.locator(config.course_module_index_selector).text_content())
 
-    mod_title = _sanitize_course_name_component(
+    mod_title = slugify(
         await module_card.locator(config.course_module_title_selector).text_content())
 
-    les_title = _sanitize_course_name_component(
+    les_title = slugify(
         await lesson_card.locator(config.course_lesson_title_selector).text_content())
 
-    path = Path(f'{config.downloads_folder}/{course_title}/[{module_no:02d}] {mod_index} - {mod_title}')
+    path = Path(f'{config.downloads_folder}/{course_title}/[{module_no:02d}] [{mod_index}] {mod_title}')
     path.mkdir(parents=True, exist_ok=True)
 
     return path.joinpath(f'[{lesson_no:02d}] {les_title}')
@@ -172,19 +176,22 @@ async def _on_m3u8_master_request(module_card: Locator,
                                   config: Config) -> None:
     try:
         active_playlist_video = lesson_card.page.locator(config.active_video_part_selector)
-        unresolved_base_path = await _ensure_path(module_card, lesson_card, module_no, lesson_no, config)
+        unresolved_base_path = await _ensure_path_created(module_card, lesson_card, module_no, lesson_no, config)
         resolved_base_path = str(unresolved_base_path.resolve())
 
         if await active_playlist_video.is_visible():
-            raw_part_title = await active_playlist_video.text_content()
-            safe_part_title = ' '.join([t.strip() for t in raw_part_title.split()])
-            resolved_base_path += f' ({_sanitize_course_name_component(safe_part_title)})'
+            active_playlist_title = slugify(await active_playlist_video.text_content())
+            active_playlist_duration = slugify(
+                await lesson_card.page.text_content(config.video_part_duration_selector))
+            active_playlist_title = active_playlist_title.removesuffix(active_playlist_duration)
+
+            resolved_base_path += f' ({active_playlist_title})'
 
         yt_dlp.utils.networking.std_headers['Referer'] = config.referer_url
         yt_dlp.utils.networking.std_headers['Origin'] = config.origin_url
 
         ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4',
+            'format': config.video_format,
             'outtmpl': f'{resolved_base_path}.%(ext)s',
             'headers': route.request.headers,
             'concurrent_fragment_downloads': cpu_count(),
@@ -193,6 +200,10 @@ async def _on_m3u8_master_request(module_card: Locator,
 
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([route.request.url])
+
+        complete_lesson_btn_locator = lesson_card.page.locator(config.course_complete_lesson_selector)
+        if await complete_lesson_btn_locator.is_visible():
+            await complete_lesson_btn_locator.click()
 
         await route.fulfill()
     finally:
@@ -224,21 +235,20 @@ async def _init_config() -> Config:
                       course_module_title_selector=settings['hotmart']['selectors']['courses']['module-title'],
                       course_lesson_card_selector=settings['hotmart']['selectors']['courses']['lesson-card'],
                       course_lesson_title_selector=settings['hotmart']['selectors']['courses']['lesson-title'],
+                      course_complete_lesson_selector=settings['hotmart']['selectors']['courses']['clear-lesson-btn'],
                       course_main_content_selector=settings['hotmart']['selectors']['courses']['main-content-section'],
                       course_video_content_selector=settings['hotmart']['selectors']['courses']['video-section'],
                       video_part_selector=settings['hotmart']['selectors']['courses']['video-part'],
+                      video_part_duration_selector=settings['hotmart']['selectors']['courses']['video-part-duration'],
                       active_video_part_selector=settings['hotmart']['selectors']['courses']['video-part-active'],
-                      sso_username_txt_selector=settings['hotmart']['selectors']['sso']['username_txt'],
-                      sso_password_txt_selector=settings['hotmart']['selectors']['sso']['password_txt'],
+                      sso_username_txt_selector=settings['hotmart']['selectors']['sso']['username-txt'],
+                      sso_password_txt_selector=settings['hotmart']['selectors']['sso']['password-txt'],
                       sso_login_btn_selector=settings['hotmart']['selectors']['sso']['login-btn'],
                       sso_user_email=credentials['hotmart']['auth']['sso']['email'],
                       sso_user_password=credentials['hotmart']['auth']['sso']['password'],
                       screenshot_extension=settings['screenshot']['ext'],
+                      video_format=settings['video']['format'],
                       downloads_folder=settings['downloads']['folder'])
-
-
-def _sanitize_course_name_component(name: str) -> str:
-    return ' '.join([n.strip() for n in name.split()]).replace('"', "'").replace('/', '|')
 
 
 if __name__ == '__main__':

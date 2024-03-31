@@ -9,14 +9,16 @@ module-index = ".navigation-module-index"
 module-title = ".navigation-module-title"
 lesson-card = ".navigation-page"
 lesson-title = ".navigation-page-title"
+clear-lesson-btn = ".btn-page-done:not(.btn-page-done-active)"
 main-content-section = ".page-main-content"
 video-section = ".content-page-video"
 video-part = ".playlist-media"
 video-part-active = ".playlist-media-active"
+video-part-duration = ".playlist-media-time"
 
 [hotmart.selectors.sso]
-username_txt = "#username"
-password_txt = "#password"
+username-txt = "#username"
+password-txt = "#password"
 login-btn = "#text-btn-login"
 
 [hotmart.urls]
@@ -31,6 +33,9 @@ m3u8-master = "**/video/**/*.m3u8*"
 
 [screenshot]
 ext = "png"
+
+[video]
+format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4"
 
 [downloads]
 folder = "../../downloads"
