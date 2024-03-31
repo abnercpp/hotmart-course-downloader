@@ -144,6 +144,10 @@ async def _save_lesson_contents(module_card: Locator,
     await lesson_card.page.unroute(config.m3u8_master_url_pattern)
     event.clear()
 
+    complete_lesson_btn_locator = lesson_card.page.locator(config.course_complete_lesson_selector)
+    if await complete_lesson_btn_locator.is_visible():
+        await complete_lesson_btn_locator.click()
+
 
 async def _ensure_path_created(module_card: Locator,
                                lesson_card: Locator,
@@ -200,10 +204,6 @@ async def _on_m3u8_master_request(module_card: Locator,
 
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([route.request.url])
-
-        complete_lesson_btn_locator = lesson_card.page.locator(config.course_complete_lesson_selector)
-        if await complete_lesson_btn_locator.is_visible():
-            await complete_lesson_btn_locator.click()
 
         await route.fulfill()
     finally:
