@@ -2,21 +2,35 @@
 accept-cookies-btn = ".cookie-policy-accept-all"
 
 [hotmart.selectors.courses]
+course-title = ".membership-info-name"
 purchased-card = ".purchase_list__block .purchase-card"
 module-card = ".navigation-module"
+module-index = ".navigation-module-index"
+module-title = ".navigation-module-title"
 lesson-card = ".navigation-page"
+lesson-title = ".navigation-page-title"
 main-content-section = ".page-main-content"
 video-section = ".content-page-video"
+video-part = ".playlist-media"
+video-part-active = ".playlist-media-active"
 
 [hotmart.selectors.sso]
 username_txt = "#username"
 password_txt = "#password"
-login_btn = "#text-btn-login"
+login-btn = "#text-btn-login"
 
 [hotmart.urls]
 consumer-portal = "https://consumer.hotmart.com/"
 courses-portal = "https://consumer.hotmart.com/main"
+origin = "https://cf-embed.play.hotmart.com"
+referer = "https://cf-embed.play.hotmart.com/"
 
 [hotmart.urls.patterns]
 login-portal = "https://sso.hotmart.com/login*"
 m3u8-master = "**/video/**/*.m3u8*"
+
+[screenshot]
+ext = "png"
+
+[downloads]
+folder = "../../downloads"

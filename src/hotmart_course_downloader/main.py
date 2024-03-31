@@ -1,26 +1,39 @@
 from asyncio import run, gather, Semaphore, Event
 from dataclasses import dataclass
+from multiprocessing import cpu_count
+from pathlib import Path
 from tomllib import loads as toml_loads
+from typing import Callable, Awaitable
 
+import yt_dlp.utils.networking
 from aiofiles import open as aio_open
 from playwright.async_api import async_playwright, Page, Route, Locator
+from yt_dlp import YoutubeDL
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Config:
     consumer_portal_url: str
     courses_portal_url: str
+    origin_url: str
+    referer_url: str
 
     login_portal_url_pattern: str
     m3u8_master_url_pattern: str
 
     accept_cookies_btn_selector: str
 
+    course_title_selector: str
     purchased_course_card_selector: str
     course_module_card_selector: str
+    course_module_index_selector: str
+    course_module_title_selector: str
     course_lesson_card_selector: str
+    course_lesson_title_selector: str
     course_main_content_selector: str
     course_video_content_selector: str
+    video_part_selector: str
+    active_video_part_selector: str
 
     sso_username_txt_selector: str
     sso_password_txt_selector: str
@@ -28,6 +41,10 @@ class Config:
 
     sso_user_email: str
     sso_user_password: str
+
+    screenshot_extension: str
+
+    downloads_folder: str
 
 
 async def main(config: Config) -> None:
@@ -65,29 +82,123 @@ async def _on_course_entered(page: Page, semaphore: Semaphore, config: Config) -
         module_cards_selector = page.locator(config.course_module_card_selector)
         await module_cards_selector.last.wait_for()
 
-        event = Event()
-
-        await page.route(config.m3u8_master_url_pattern,
-                         lambda route: _on_m3u8_master_request(page, route, event, config))
-
-        for module_card in await module_cards_selector.all():
+        for module_no, module_card in enumerate(await module_cards_selector.all()):
             await module_card.click()
-            lesson_cards_selector = page.locator(config.course_lesson_card_selector)
+            lesson_cards_selector = module_card.locator(config.course_lesson_card_selector)
             await lesson_cards_selector.last.wait_for()
-            for lesson_card in await lesson_cards_selector.all():
-                await lesson_card.click()
-                main_content_selector = page.locator(config.course_main_content_selector)
-                await main_content_selector.wait_for()
-                if await page.is_visible(config.course_video_content_selector):
-                    await event.wait()
-                event.clear()
+
+            for lesson_no, lesson_card in enumerate(await lesson_cards_selector.all()):
+                await _save_lesson_contents(module_card,
+                                            lesson_card,
+                                            module_no,
+                                            lesson_no,
+                                            lambda: lesson_card.click(),
+                                            config)
+
+                video_parts_locator = page.locator(config.video_part_selector)
+                if not await video_parts_locator.last.is_visible():
+                    continue
+
+                video_parts = await video_parts_locator.all()
+                video_parts.pop()
+
+                for video_part in video_parts:
+                    await _save_lesson_contents(module_card,
+                                                lesson_card,
+                                                module_no,
+                                                lesson_no,
+                                                lambda: video_part.click(),
+                                                config)
     finally:
         semaphore.release()
 
 
-async def _on_m3u8_master_request(page: Page, route: Route, event: Event, config: Config) -> None:
-    print('Downloading!', page, route, event, config)
-    event.set()
+async def _save_lesson_contents(module_card: Locator,
+                                lesson_card: Locator,
+                                module_no: int,
+                                lesson_no: int,
+                                click_to_update: Callable[[], Awaitable],
+                                config: Config) -> None:
+    event = Event()
+    await lesson_card.page.route(config.m3u8_master_url_pattern,
+                                 lambda route: _on_m3u8_master_request(module_card,
+                                                                       lesson_card,
+                                                                       module_no,
+                                                                       lesson_no,
+                                                                       route,
+                                                                       event,
+                                                                       config))
+    await click_to_update()
+    main_content_selector = lesson_card.page.locator(config.course_main_content_selector)
+    await main_content_selector.wait_for()
+    if await lesson_card.page.is_visible(config.course_video_content_selector):
+        await event.wait()
+    else:
+        path = await _ensure_path(module_card, lesson_card, module_no, lesson_no, config)
+        await main_content_selector.screenshot(path=f'{path.resolve()}.{config.screenshot_extension}')
+
+    await lesson_card.page.unroute(config.m3u8_master_url_pattern)
+    event.clear()
+
+
+async def _ensure_path(module_card: Locator,
+                       lesson_card: Locator,
+                       module_no: int,
+                       lesson_no: int,
+                       config: Config) -> Path:
+    course_title = await module_card.page.text_content(config.course_title_selector)
+    course_title = course_title.replace('"', '\'').replace('/', '|')
+
+    mod_index = await module_card.locator(config.course_module_index_selector).text_content()
+    mod_index = ' '.join([i.strip() for i in mod_index.split()])
+    mod_index = mod_index.replace('"', '\'').replace('/', '|')
+
+    mod_title = await module_card.locator(config.course_module_title_selector).text_content()
+    mod_title = mod_title.replace('"', '\'').replace('/', '|')
+
+    les_title = await lesson_card.locator(config.course_lesson_title_selector).text_content()
+    les_title = les_title.replace('"', '\'').replace('/', '|')
+
+    path = Path(f'{config.downloads_folder}/{course_title}/[{module_no:02d}] {mod_index} - {mod_title}')
+    path.mkdir(parents=True, exist_ok=True)
+
+    return path.joinpath(f'[{lesson_no:02d}] {les_title}')
+
+
+async def _on_m3u8_master_request(module_card: Locator,
+                                  lesson_card: Locator,
+                                  module_no: int,
+                                  lesson_no: int,
+                                  route: Route,
+                                  event: Event,
+                                  config: Config) -> None:
+    try:
+        active_playlist_video = lesson_card.page.locator(config.active_video_part_selector)
+        unresolved_base_path = await _ensure_path(module_card, lesson_card, module_no, lesson_no, config)
+        resolved_base_path = str(unresolved_base_path.resolve())
+
+        if await active_playlist_video.is_visible():
+            raw_part_title = await active_playlist_video.text_content()
+            safe_part_title = ' '.join([t.strip() for t in raw_part_title.split()])
+            resolved_base_path += f' ({safe_part_title.replace('"', '\'').replace('/', '|')})'
+
+        yt_dlp.utils.networking.std_headers['Referer'] = config.referer_url
+        yt_dlp.utils.networking.std_headers['Origin'] = config.origin_url
+
+        ydl_opts = {
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4',
+            'outtmpl': f'{resolved_base_path}.%(ext)s',
+            'headers': route.request.headers,
+            'concurrent_fragment_downloads': cpu_count(),
+            'hls_segment_threads': cpu_count()
+        }
+
+        with YoutubeDL(ydl_opts) as ydl:
+            ydl.download([route.request.url])
+
+        await route.fulfill()
+    finally:
+        event.set()
 
 
 async def _main() -> None:
@@ -103,19 +214,29 @@ async def _init_config() -> Config:
         credentials = toml_loads(credentials_contents)
         return Config(consumer_portal_url=settings['hotmart']['urls']['consumer-portal'],
                       courses_portal_url=settings['hotmart']['urls']['courses-portal'],
+                      origin_url=settings['hotmart']['urls']['origin'],
+                      referer_url=settings['hotmart']['urls']['referer'],
                       login_portal_url_pattern=settings['hotmart']['urls']['patterns']['login-portal'],
                       m3u8_master_url_pattern=settings['hotmart']['urls']['patterns']['m3u8-master'],
                       accept_cookies_btn_selector=settings['hotmart']['selectors']['accept-cookies-btn'],
+                      course_title_selector=settings['hotmart']['selectors']['courses']['course-title'],
                       purchased_course_card_selector=settings['hotmart']['selectors']['courses']['purchased-card'],
                       course_module_card_selector=settings['hotmart']['selectors']['courses']['module-card'],
+                      course_module_index_selector=settings['hotmart']['selectors']['courses']['module-index'],
+                      course_module_title_selector=settings['hotmart']['selectors']['courses']['module-title'],
                       course_lesson_card_selector=settings['hotmart']['selectors']['courses']['lesson-card'],
+                      course_lesson_title_selector=settings['hotmart']['selectors']['courses']['lesson-title'],
                       course_main_content_selector=settings['hotmart']['selectors']['courses']['main-content-section'],
                       course_video_content_selector=settings['hotmart']['selectors']['courses']['video-section'],
+                      video_part_selector=settings['hotmart']['selectors']['courses']['video-part'],
+                      active_video_part_selector=settings['hotmart']['selectors']['courses']['video-part-active'],
                       sso_username_txt_selector=settings['hotmart']['selectors']['sso']['username_txt'],
                       sso_password_txt_selector=settings['hotmart']['selectors']['sso']['password_txt'],
-                      sso_login_btn_selector=settings['hotmart']['selectors']['sso']['login_btn'],
+                      sso_login_btn_selector=settings['hotmart']['selectors']['sso']['login-btn'],
                       sso_user_email=credentials['hotmart']['auth']['sso']['email'],
-                      sso_user_password=credentials['hotmart']['auth']['sso']['password'])
+                      sso_user_password=credentials['hotmart']['auth']['sso']['password'],
+                      screenshot_extension=settings['screenshot']['ext'],
+                      downloads_folder=settings['downloads']['folder'])
 
 
 if __name__ == '__main__':
