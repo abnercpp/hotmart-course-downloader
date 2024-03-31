@@ -146,18 +146,16 @@ async def _ensure_path(module_card: Locator,
                        module_no: int,
                        lesson_no: int,
                        config: Config) -> Path:
-    course_title = await module_card.page.text_content(config.course_title_selector)
-    course_title = course_title.replace('"', '\'').replace('/', '|')
+    course_title = _sanitize_course_name_component(await module_card.page.text_content(config.course_title_selector))
 
-    mod_index = await module_card.locator(config.course_module_index_selector).text_content()
-    mod_index = ' '.join([i.strip() for i in mod_index.split()])
-    mod_index = mod_index.replace('"', '\'').replace('/', '|')
+    mod_index = _sanitize_course_name_component(
+        await module_card.locator(config.course_module_index_selector).text_content())
 
-    mod_title = await module_card.locator(config.course_module_title_selector).text_content()
-    mod_title = mod_title.replace('"', '\'').replace('/', '|')
+    mod_title = _sanitize_course_name_component(
+        await module_card.locator(config.course_module_title_selector).text_content())
 
-    les_title = await lesson_card.locator(config.course_lesson_title_selector).text_content()
-    les_title = les_title.replace('"', '\'').replace('/', '|')
+    les_title = _sanitize_course_name_component(
+        await lesson_card.locator(config.course_lesson_title_selector).text_content())
 
     path = Path(f'{config.downloads_folder}/{course_title}/[{module_no:02d}] {mod_index} - {mod_title}')
     path.mkdir(parents=True, exist_ok=True)
@@ -180,7 +178,7 @@ async def _on_m3u8_master_request(module_card: Locator,
         if await active_playlist_video.is_visible():
             raw_part_title = await active_playlist_video.text_content()
             safe_part_title = ' '.join([t.strip() for t in raw_part_title.split()])
-            resolved_base_path += f' ({safe_part_title.replace('"', '\'').replace('/', '|')})'
+            resolved_base_path += f' ({_sanitize_course_name_component(safe_part_title)})'
 
         yt_dlp.utils.networking.std_headers['Referer'] = config.referer_url
         yt_dlp.utils.networking.std_headers['Origin'] = config.origin_url
@@ -237,6 +235,10 @@ async def _init_config() -> Config:
                       sso_user_password=credentials['hotmart']['auth']['sso']['password'],
                       screenshot_extension=settings['screenshot']['ext'],
                       downloads_folder=settings['downloads']['folder'])
+
+
+def _sanitize_course_name_component(name: str) -> str:
+    return ' '.join([n.strip() for n in name.split()]).replace('"', "'").replace('/', '|')
 
 
 if __name__ == '__main__':
