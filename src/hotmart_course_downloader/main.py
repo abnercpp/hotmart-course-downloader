@@ -216,7 +216,7 @@ async def _main() -> None:
 
 
 async def _init_config() -> Config:
-    async with (aio_open('../../config/settings.toml', 'r') as settings_toml,
+    async with (aio_open('../../config/settings.toml') as settings_toml,
                 aio_open('../../config/credentials.toml') as credentials_toml):
         (settings_contents, credentials_contents) = await gather(settings_toml.read(), credentials_toml.read())
         settings = toml_loads(settings_contents)
