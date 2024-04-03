@@ -3,7 +3,7 @@
 Download contents from your Hotmart courses.
 
 > [!CAUTION]
-> This script is simply for downloading content you already have access to. **Do not use it for piracy!**
+> This project is simply for downloading content you already have access to. **Do not use it for piracy!**
 
 ## Running the project
 
@@ -11,6 +11,9 @@ Before running the program, you need to set up your Hotmart SSO credentials in
 the [config/credentials.toml](config/credentials.toml) file.
 
 Once your credentials are set, you can run the following in your shell:
+
+> [!TIP]
+> You will need [Python 3.12 or newer](https://www.python.org/downloads/) to run this project.
 
 ```shell
 pip install -r requirements.txt
