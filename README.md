@@ -17,7 +17,8 @@ Once your credentials are set, you can run the following in your shell:
 
 ```shell
 pip install -r requirements.txt
-python src/hotmart_course_downloader/main.py
+cd src/hotmart_course_downloader
+python main.py
 ```
 
 ## Nature of this project
